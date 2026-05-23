@@ -98,3 +98,35 @@ def excluir_anotacao(id_nota):
     # Executa a remoção baseada no ObjectId do documento
     resultado = colecao.delete_one({"_id": ObjectId(id_nota)})
     return resultado.deleted_count > 0
+
+def registrar_log_auditoria(evento, detalhes, ip_usuario="desconhecido"):
+    """
+    Registra um evento de segurança ou alteração crítica na coleção de auditoria.
+    """
+    db = get_database()
+    if db is None:
+        return False
+        
+    colecao = db["auditoria_acesso"]
+    
+    log = {
+        "evento": evento,        # ex: "login_sucesso", "login_falha_senha", "nota_excluida"
+        "detalhes": detalhes,    # Descrição do que aconteceu
+        "ip_origem": ip_usuario, # IP do cliente fornecido pelo Streamlit
+        "data_evento": datetime.datetime.now(datetime.timezone.utc)
+    }
+    
+    colecao.insert_one(log)
+    return True
+
+def buscar_logs_auditoria(limite=50):
+    """
+    Retorna os últimos logs de auditoria registrados, ordenados do mais recente para o mais antigo.
+    """
+    db = get_database()
+    if db is None:
+        return []
+        
+    colecao = db["auditoria_acesso"]
+    # Busca os registros e ordena pela data_evento decrescente (-1)
+    return list(colecao.find().sort("data_evento", -1).limit(limite))

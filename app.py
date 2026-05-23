@@ -3,7 +3,7 @@ import streamlit as st
 from auth.security import verificar_senha, verificar_codigo_2fa, gerar_qrcode_setup
 from zoneinfo import ZoneInfo
 import base64
-from database.connection import salvar_anotacao, buscar_anotacoes_filtradas, atualizar_anotacao, excluir_anotacao
+from database.connection import salvar_anotacao, buscar_anotacoes_filtradas, atualizar_anotacao, excluir_anotacao,registrar_log_auditoria,buscar_logs_auditoria
 
 st.set_page_config(
     page_title="Meu Portal de Anotações", 
@@ -28,10 +28,13 @@ def tela_login():
             botao_senha = st.form_submit_button("Continuar")
             
             if botao_senha:
+                ip_atual = st.context.headers.get("X-Forwarded-For", "127.0.0.1")
                 if verificar_senha(senha):
                     st.session_state.passo_senha_ok = True
                     st.rerun()
                 else:
+                    # AUDITORIA: Registra erro de senha
+                    registrar_log_auditoria("login_falha_senha", "Tentativa de acesso com senha incorreta.", ip_atual)
                     st.error("Senha incorreta. Acesso negado.")
                     
     # ETAPA 2: Validação do Código 2FA
@@ -43,12 +46,17 @@ def tela_login():
             botao_2fa = st.form_submit_button("Verificar e Entrar")
             
             if botao_2fa:
+                ip_atual = st.context.headers.get("X-Forwarded-For", "127.0.0.1")
                 if verificar_codigo_2fa(codigo_2fa):
                     st.session_state.autenticado = True
+                    # AUDITORIA: Sucesso total no login
+                    registrar_log_auditoria("login_sucesso", "Usuário autenticado com sucesso via Senha + 2FA.", ip_atual)
                     st.success("Autenticado com sucesso!")
                     st.rerun()
                 else:
-                    st.error("Código inválido ou expirado. Tente novamente.")
+                    # AUDITORIA: Alguém acertou a senha, mas errou o token do celular!
+                    registrar_log_auditoria("login_falha_2fa", "Senha correta, mas falhou no token de 6 dígitos.", ip_atual)
+        st.error("Código inválido ou expirado. Tente novamente.")
         
         # # Seção expansível para você ler o QR Code pela primeira vez
         # with st.expander("Primeira vez aqui? Escaneie o QR Code no seu celular"):
@@ -68,6 +76,8 @@ else:
     st.title("📝 Meu Portal de Anotações")
     
     if st.sidebar.button("Sair do Portal"):
+        ip_atual = st.context.headers.get("X-Forwarded-For", "127.0.0.1")
+        registrar_log_auditoria("logout", "Usuário encerrou a sessão manualmente.", ip_atual)
         st.session_state.autenticado = False
         st.session_state.passo_senha_ok = False
         st.rerun()
@@ -111,6 +121,10 @@ else:
                 
                 sucesso = atualizar_anotacao(nota_atual["_id"], ed_titulo, ed_conteudo, ed_tags, lista_novos_arquivos)
                 if sucesso:
+                    # ✨ ADICIONE ESTAS LINHAS AQUI PARA GRAVAR O LOG DE EDIÇÃO:
+                    ip_atual = st.context.headers.get("X-Forwarded-For", "127.0.0.1")
+                    registrar_log_auditoria("nota_editada", f"Anotação modificada de '{nota_atual['titulo']}' para '{ed_titulo}'", ip_atual)
+                    
                     st.success("Anotação atualizada com sucesso!")
                     st.session_state.nota_em_edicao = None
                     st.rerun()
@@ -124,8 +138,7 @@ else:
         st.write("---")
 
     # Sistema de Abas padrão
-    aba_criar, aba_buscar = st.tabs(["✨ Nova Anotação", "🔍 Buscar e Visualizar"])
-    
+    aba_criar, aba_buscar, aba_auditoria = st.tabs(["✨ Nova Anotação", "🔍 Buscar e Visualizar", "🛡️ Auditoria"])
     # --- ABA 1: CRIAR ANOTAÇÃO ---
     with aba_criar:
         st.subheader("Criar uma nova nota")
@@ -150,26 +163,31 @@ else:
                 else:
                     lista_arquivos_base64 = []
                     
-                    # Processa cada um dos múltiplos arquivos enviados
                     if arquivos_enviados:
                         for arquivo in arquivos_enviados:
                             bytes_arq = arquivo.read()
                             string_base64 = base64.b64encode(bytes_arq).decode('utf-8')
                             lista_arquivos_base64.append({
-                                "nome": arquivo.name,
-                                "tipo": arquivo.type,
-                                "base64": string_base64
-                            })
+                            "nome": arquivo.name,
+                            "tipo": arquivo.type,
+                            "base64": string_base64
+                        })
+                
+                id_inserido = salvar_anotacao(titulo_nota, conteudo_nota, tags_nota, lista_arquivos_base64)
+                
+                if id_inserido:
+                    # ✨ ADICIONE ESTAS LINHAS AQUI PARA GRAVAR O LOG DE CRIAÇÃO:
+                    ip_atual = st.context.headers.get("X-Forwarded-For", "127.0.0.1")
+                    registrar_log_auditoria("nota_criada", f"Nova anotação criada: '{titulo_nota}'", ip_atual)
                     
-                    id_inserido = salvar_anotacao(titulo_nota, conteudo_nota, tags_nota, lista_arquivos_base64)
-                    
-                    if id_inserido:
-                        st.success(f"Nota gravada com sucesso no MongoDB! ID: {id_inserido}")
-                    else:
-                        st.error("Falha ao salvar nota.")
+                    st.success(f"Nota gravada com sucesso no MongoDB! ID: {id_inserido}")
+                    st.rerun()
+                else:
+                    st.error("Falha ao salvar nota.")
 
     # --- ABA 2: BUSCAR E VISUALIZAR ANOTAÇÕES ---
     with aba_buscar:
+
         st.subheader("Filtrar suas anotações")
         
         col1, col2, col3 = st.columns(3)
@@ -239,10 +257,52 @@ else:
                         
                         # O botão real de exclusão fica oculto dentro do popover
                         if st.button("Sim, apagar nota", key=f"conf_ex_{nota['_id']}", type="primary", width='stretch'):
+                            ip_atual = st.context.headers.get("X-Forwarded-For", "127.0.0.1")
+                            titulo_nota_excluida = nota["titulo"]
                             sucesso_exclusao = excluir_anotacao(nota["_id"])
                             
                             if sucesso_exclusao:
+                                # AUDITORIA: Registra remoção de dado
+                                registrar_log_auditoria("nota_excluida", f"A nota intitulada '{titulo_nota_excluida}' foi deletada permanentemente.", ip_atual)
                                 st.success("Nota excluída!")
-                                st.rerun() # Atualiza a tela imediatamente para sumir com a nota
-                            else:
-                                st.error("Erro ao tentar excluir a nota.")
+                                st.rerun()
+    # --- ABA 3: AUDITORIA DE ACESSO ---
+    with aba_auditoria:
+        st.subheader("Trilha de Auditoria e Segurança")
+        st.write("Histórico de tentativas de acesso, alterações e exclusões do portal:")
+        
+        # Busca os logs atualizados do Atlas
+        logs = buscar_logs_auditoria(limite=50)
+        
+        if not logs:
+            st.info("Nenhum registro de auditoria encontrado.")
+        else:
+            # Prepara os dados em uma lista de dicionários formatada para exibição
+            dados_tabela = []
+            for log in logs:
+                # Converte o fuso horário para o horário de Brasília igual fizemos nas notas
+                data_utc = log["data_evento"].replace(tzinfo=ZoneInfo("UTC"))
+                data_local = data_utc.astimezone(ZoneInfo("America/Sao_Paulo"))
+                
+                dados_tabela.append({
+                    "Horário": data_local.strftime("%d/%m/%Y %H:%M:%S"),
+                    "Evento": log["evento"].upper(),
+                    "Descrição": log["detalhes"],
+                    "IP de Origem": log["ip_origem"]
+                })
+            
+            # Renderiza uma tabela nativa e interativa do Streamlit
+            st.dataframe(
+                dados_tabela, 
+                width='stretch',
+                column_config={
+                    "Horário": st.column_config.TextColumn(width="medium"),
+                    "Evento": st.column_config.TextColumn(width="small"),
+                    "Descrição": st.column_config.TextColumn(width="large"),
+                    "IP de Origem": st.column_config.TextColumn(width="small"),
+                }
+            )
+            
+            # Botão rápido para forçar a atualização dos logs na tela
+            if st.button("🔄 Atualizar Logs"):
+                st.rerun()
