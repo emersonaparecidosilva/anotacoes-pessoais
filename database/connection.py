@@ -84,3 +84,17 @@ def buscar_anotacoes_filtradas(termo_busca=None, tag_busca=None, data_busca=None
         query["data_criacao"] = {"$gte": inicio_dia, "$lte": fim_dia}
         
     return list(db["anotacoes"].find(query).sort("data_criacao", -1))
+
+def excluir_anotacao(id_nota):
+    """
+    Remove definitivamente uma anotação do MongoDB Atlas usando o ID.
+    """
+    db = get_database()
+    if db is None:
+        return False
+        
+    colecao = db["anotacoes"]
+    
+    # Executa a remoção baseada no ObjectId do documento
+    resultado = colecao.delete_one({"_id": ObjectId(id_nota)})
+    return resultado.deleted_count > 0

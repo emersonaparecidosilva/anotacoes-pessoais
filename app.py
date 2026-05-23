@@ -3,7 +3,7 @@ import streamlit as st
 from auth.security import verificar_senha, verificar_codigo_2fa, gerar_qrcode_setup
 from zoneinfo import ZoneInfo
 import base64
-from database.connection import salvar_anotacao, buscar_anotacoes_filtradas, atualizar_anotacao
+from database.connection import salvar_anotacao, buscar_anotacoes_filtradas, atualizar_anotacao, excluir_anotacao
 
 st.set_page_config(page_title="Meu Portal de Anotações", page_icon="🔒", layout="centered")
 
@@ -206,9 +206,8 @@ else:
                     for idx, arq in enumerate(nota["arquivos"]):
                         dados_totais = base64.b64decode(arq["base64"])
                         
-                        # Se for imagem, exibe diretamente (Corrigido aviso de deprecation trocando por st.image(..., use_container_width=True))
                         if "image" in arq["tipo"]:
-                            st.image(dados_totais, caption=arq["nome"], use_container_width=True)
+                            st.image(dados_totais, caption=arq["nome"], width='stretch')
                         else:
                             # Se for PDF ou Office, cria um botão nativo de download para você baixar o arquivo de volta intacto
                             st.download_button(
@@ -220,6 +219,26 @@ else:
                             )
                 
                 # Botão para ativar a edição desta nota específica
-                if st.button("✏️ Editar esta Anotação", key=f"btn_ed_{nota['_id']}"):
-                    st.session_state.nota_em_edicao = nota
-                    st.rerun()
+
+                col_btn_ed, col_btn_ex = st.columns([1, 1])
+
+                with col_btn_ed:
+                    # Botão de Edição já existente
+                    if st.button("✏️ Editar", key=f"btn_ed_{nota['_id']}", width='stretch'):
+                        st.session_state.nota_em_edicao = nota
+                        st.rerun()
+
+                with col_btn_ex:
+                    # Novo: Popover de confirmação para evitar cliques acidentais
+                    with st.popover("🗑️ Excluir", width='stretch'):
+                        st.warning("Tem certeza? Esta ação não pode ser desfeita.")
+                        
+                        # O botão real de exclusão fica oculto dentro do popover
+                        if st.button("Sim, apagar nota", key=f"conf_ex_{nota['_id']}", type="primary", width='stretch'):
+                            sucesso_exclusao = excluir_anotacao(nota["_id"])
+                            
+                            if sucesso_exclusao:
+                                st.success("Nota excluída!")
+                                st.rerun() # Atualiza a tela imediatamente para sumir com a nota
+                            else:
+                                st.error("Erro ao tentar excluir a nota.")
