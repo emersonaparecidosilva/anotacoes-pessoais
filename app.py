@@ -5,7 +5,11 @@ from zoneinfo import ZoneInfo
 import base64
 from database.connection import salvar_anotacao, buscar_anotacoes_filtradas, atualizar_anotacao, excluir_anotacao
 
-st.set_page_config(page_title="Meu Portal de Anotações", page_icon="🔒", layout="centered")
+st.set_page_config(
+    page_title="Meu Portal de Anotações", 
+    page_icon="🔒", 
+    layout="wide" 
+)
 
 # Inicializa o estado de login caso não exista
 if "autenticado" not in st.session_state:
