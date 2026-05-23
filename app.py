@@ -1,6 +1,9 @@
 # app.py
 import streamlit as st
 from auth.security import verificar_senha, verificar_codigo_2fa, gerar_qrcode_setup
+from zoneinfo import ZoneInfo
+import base64
+from database.connection import salvar_anotacao, buscar_anotacoes_filtradas, atualizar_anotacao
 
 st.set_page_config(page_title="Meu Portal de Anotações", page_icon="🔒", layout="centered")
 
@@ -52,9 +55,6 @@ def tela_login():
         if st.button("Voltar para tela de senha"):
             st.session_state.passo_senha_ok = False
             st.rerun()
-
-import base64
-from database.connection import salvar_anotacao, buscar_anotacoes_filtradas, atualizar_anotacao
 
 # --- CONTROLE DE ROTA PRINCIPAL ---
 if not st.session_state.autenticado:
@@ -184,7 +184,9 @@ else:
         st.write("---")
         
         for nota in notas_encontradas:
-            data_formatada = nota["data_criacao"].strftime("%d/%m/%Y %H:%M")
+            data_utc = nota["data_criacao"].replace(tzinfo=ZoneInfo("UTC"))
+            data_local = data_utc.astimezone(ZoneInfo("America/Sao_Paulo"))
+            data_formatada = data_local.strftime("%d/%m/%Y %H:%M")
             
             # REQUISITO: Exibição limpa em modo expansível (Título + Data no cabeçalho)
             label_expander = f"📌 {nota['titulo']} | 📅 {data_formatada}"
